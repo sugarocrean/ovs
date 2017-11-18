@@ -41,6 +41,7 @@
 VLOG_DEFINE_THIS_MODULE(util);
 
 COVERAGE_DEFINE(util_xalloc);
+COVERAGE_DEFINE(util_xalloc_numa);
 
 /* argv[0] without directory names. */
 char *program_name;
@@ -143,6 +144,33 @@ xmemdup0(const char *p_, size_t length)
     memcpy(p, p_, length);
     p[length] = '\0';
     return p;
+}
+
+void *
+xmalloc_numa(size_t size, int node)
+{
+    void *p = numa_alloc_onnode(size, node);
+    COVERAGE_INC(util_xalloc_numa);
+    if (p == NULL) {
+        out_of_memory();
+    }
+    return p;
+}
+
+void *
+xzalloc_numa(size_t size, int node)
+{
+    void *p = xmalloc_numa(size, node);
+    if (p) {
+        memset(p, 0, size);
+    }
+    return p;
+}
+
+void
+xfree_numa(void *mem, size_t size)
+{
+    numa_free(mem, size);
 }
 
 char *

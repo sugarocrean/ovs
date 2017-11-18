@@ -30,6 +30,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <numaif.h>
 
 #ifdef DPDK_NETDEV
 #include <rte_cycles.h>
@@ -3159,7 +3160,8 @@ reconfigure_pmd_threads(struct dp_netdev *dp)
         /* Do not destroy the non pmd thread. */
         dp_netdev_destroy_all_pmds(dp, false);
         FOR_EACH_CORE_ON_DUMP (core, pmd_cores) {
-            struct dp_netdev_pmd_thread *pmd = xzalloc(sizeof *pmd);
+            struct dp_netdev_pmd_thread *pmd = xzalloc_numa(sizeof *pmd,
+                                                            core->numa_id);
 
             dp_netdev_configure_pmd(pmd, dp, core->core_id, core->numa_id);
 
@@ -3515,6 +3517,20 @@ pmd_load_queues_and_ports(struct dp_netdev_pmd_thread *pmd,
     return i;
 }
 
+static void
+pmd_thread_numa_show(struct dp_netdev_pmd_thread *pmd)
+{
+    int node;
+
+    if (!get_mempolicy(&node, NULL, 0, pmd, MPOL_F_NODE | MPOL_F_ADDR)) {
+        VLOG_INFO("pmd thread runs on numa node %d, "
+                  "its tls is located on numa node %d.\n",
+                  pmd->numa_id, node);
+    } else {
+        VLOG_INFO("Unable to get pmd numa information.\n");
+    }
+}
+
 static void *
 pmd_thread_main(void *f_)
 {
@@ -3532,6 +3548,7 @@ pmd_thread_main(void *f_)
     ovs_numa_thread_setaffinity_core(pmd->core_id);
     dpdk_set_lcore_id(pmd->core_id);
     poll_cnt = pmd_load_queues_and_ports(pmd, &poll_list);
+    pmd_thread_numa_show(pmd);
 reload:
     emc_cache_init(&pmd->flow_cache);
 
@@ -3757,7 +3774,7 @@ dp_netdev_destroy_pmd(struct dp_netdev_pmd_thread *pmd)
     xpthread_cond_destroy(&pmd->cond);
     ovs_mutex_destroy(&pmd->cond_mutex);
     ovs_mutex_destroy(&pmd->port_mutex);
-    free(pmd);
+    xfree_numa(pmd, sizeof *pmd);
 }
 
 /* Stops the pmd thread, removes it from the 'dp->poll_threads',
